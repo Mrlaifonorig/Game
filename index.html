@@ -73,6 +73,11 @@ var(--hash);animation:blink 1.4s infinite}
 #toast.on{opacity:1;transform:translate(-50%,0)}
 #toast.bad{border-color:var(--bad)}
 prefers-reduced-motion:reduce{.unit.on .fan,.unit.on::after{animation:none}}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.tab.on{background:var(--hash);color:#06231e;border-color:var(--hash)}
+.pane{display:none;gap:10px}
+.sub{font-size:12px;color:var(--mut);margin-top:10px;text-align:center}
+.item p{font-size:12px;color:var(--mut);line-height:1.45}
 </style>
 </head>
 <body>
@@ -82,7 +87,7 @@ prefers-reduced-motion:reduce{.unit.on .fan,.unit.on::after{animation:none}}
   <button class="btn" id="reset">Начать заново</button>
  </header>
 
- <div class="alert" id="blackout">Электричество отключено: на счёте нет денег для оплаты. Продай монеты или добудь вручную, чтобы запустить ферму.</div>
+ <div class="alert" id="alertBox">Электричество отключено: на счёте нет денег для оплаты. Продай монеты или добудь вручную, чтобы запустить ферму.</div>
 
  <div class="stats">
   <div class="stat cash"><small>Баланс</small><b id="sCash">$0</b></div>
@@ -96,8 +101,8 @@ prefers-reduced-motion:reduce{.unit.on .fan,.unit.on::after{animation:none}}
  <div class="grid">
   <div>
    <div class="card">
-    <h2>Курс FRM <span id="tar"></span></h2>
-    <canvas id="chart"></canvas>
+    <h2>Курс FRM <span id="tarInfo"></span></h2>
+    <canvas id="cvs"></canvas>
     <div class="sell">
      <button class="btn" data-s=".25">Продать 25%</button>
      <button class="btn" data-s=".5">Продать 50%</button>
@@ -105,21 +110,19 @@ prefers-reduced-motion:reduce{.unit.on .fan,.unit.on::after{animation:none}}
     </div>
    </div>
    <div class="card">
-    <h2>Твоя ферма <span id="hr"></span></h2>
+    <h2>Твоя ферма <span id="hrInfo"></span></h2>
     <div class="farm" id="farm"></div>
    </div>
   </div>
   <div>
    <div class="card">
     <button class="btn manual" id="manual">Добыть вручную</button>
+    <div class="sub" id="manualInfo"></div>
    </div>
    <div class="card">
-    <h2>Оборудование</h2>
-    <div class="shop" id="rigs"></div>
-   </div>
-   <div class="card">
-    <h2>Экономия энергии</h2>
-    <div class="shop" id="ups"></div>
+    <h2>Магазин</h2>
+    <div class="tabs" id="tabs"></div>
+    <div id="shop"></div>
    </div>
   </div>
  </div>
@@ -127,51 +130,92 @@ prefers-reduced-motion:reduce{.unit.on .fan,.unit.on::after{animation:none}}
 <div id="toast"></div>
 
 <script>
+addEventListener('error',e=>{let d=document.getElementById('err');if(!d){d=document.createElement('div');d.id='err';d.style.cssText='position:fixed;top:0;left:0;right:0;background:#a22;color:#fff;padding:8px;font:12px monospace;z-index:99';document.body.appendChild(d)}d.textContent='Ошибка: '+e.message+' (строка '+e.lineno+')'});
+
 const RIGS=[
  {id:'gpu',name:'Видеокарта GTX',h:1,p:.4,c:60},
- {id:'rtx',name:'RTX-стойка',h:6,p:2,c:400},
+ {id:'rtx',name:'RTX-стойка',h:
+
+
+6,p:2,c:400},
  {id:'asic',name:'ASIC-майнер',h:35,p:10,c:2500},
  {id:'cloud',name:'Облачная шахта',h:200,p:50,c:15000}
 ];
-const UPS=[
- {id:'cool',name:'Жидкостное охлаждение',d:'Потребление −15% за уровень',c:800,max:3,m:2.2},
- {id:'solar',name:'Солнечные панели',d:'Тариф −20% за уровень',c:3000,max:3,m:2.6}
+const PCS=[
+ {n:'Старый ноутбук',d:'Греется и шумит, но майнить на нём можно.',c:0,m:0},
+ {n:'Офисный ПК',d:'Тихий системник с нормальным блоком питания.',c:1200,m:.10},
+ {n:'Игровой ПК',d:'Мощный процессор и быстрая память: все карты работают стабильнее.',c:6000,m:.25},
+ {n:'Рабочая станция',d:'Серверная плата, память с коррекцией ошибок и отличное охлаждение.',c:30000,m:.5},
+ {n:'Суперкомпьютер',d:'Целый шкаф с жидкостным контуром. Ферма летает.',c:150000,m:1}
 ];
-const KEY='cryptofarm_v1', COIN_PER_HASH=.001;
-const fresh=()=>({cash:100,coins:0,price:1000,mean:1000,trend:0,tariff:.7,tMul:1,tLeft:0,own:{},off:{},lvl:{},hist:[],evIn:45});
-let S=load();
-function load(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.hist)return s}catch
+const UPS=[
+ {id:'ram',tab:'pc',name:'Оперативная память',d:'Ещё одна планка. Хешрейт +5% за уровень.',c:300,max:8,m:1.7},
+ {id:'cpu',tab:'pc',name:'Процессор',d:'Ручная добыча +50% за уровень.',c:500,max:6,m:1.9},
+ {id:'psu',tab:'pc',name:'Блок питания 80+ Gold',d:'Потребление −5% за уровень.',c:900,max:5,m:2},
+ {id:'chair',tab:'life',name:'Кресло геймера',d:'Рука не устаёт: ручная добыча +50%.',c:700,max:1,m:1},
+ {id:'cat',tab:'life',name:'Кот-талисман',d:'Спит на тёплом системнике и приносит удачу. Хешрейт +5%.',c:5000,max:1,m:1},
+ {id:'av',tab:'life',name:'Антивирус',d:'Отбивает атаки хакеров, которые крадут часть монет.',c:1500,max:1,m:1},
+ {id:'cool',tab:'energy',name:'Жидкостное охлаждение',d:'Потребление −15% за уровень.',c:800,max:3,m:2.2},
+ {id:'solar',tab:'energy',name:'Солнечные панели',d:'Тариф −20% за уровень.',c:3000,max:3,m:2.6},
+ {id:'ac',tab:'energy',name:'Кондиционер',d:'Ферма не перегревается: потребление −10% за уровень.',c:2000,max:2,m:3}
+];
+const TABS=[['rigs','Майнеры'],['pc','Компьютер'],['life','Быт'],['energy','Энергия']];
+const KEY='cryptofarm_v1',COIN_PER_HASH=.001,COFFEE_COST=40;
 
-
-(e){}return fresh()}
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
-for(let i=S.hist.length;i<120;i++)S.hist.push(S.price);
+function genHist(p){const a=[];for(let i=0;i<120;i++){a.unshift(p);p=Math.max(120,p*(1+(Math.random()-.5)*.06)+(1000-p)*.01)}return a}
+const fresh=()=>{const p=1000;return{cash:100,coins:0,price:p,mean:1000,trend:0,tariff:.7,tMul:1,tLeft:0,coffee:0,own:{},off:{},lvl:{},hist:genHist(p),evIn:45}};
+function loadState(){try{const s=JSON.parse(localStorage.getItem(KEY));if(s&&s.hist){const f=Object.assign(fresh(),s);if(Math.max(...f.hist)-Math.min(...f.hist)<1)f.hist=genHist(f.price);return f}}catch(e){}return fresh()}
+let S=loadState();
+function saveState(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
 
 const $=id=>document.getElementById(id);
-const fmt=(n,d=0)=>{const a=Math.abs(n);if(a>=1e9)return(n/1e9).toFixed(2)+'B';if(a>=1e6)return(n/1e6).toFixed(2)+'M';if(a>=1e4)return(n/1e3).toFixed(1)+'K';return n.toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d})};
+const fmt=(n,d=0)=>{const a=Math.abs(n);if(a>=1e9)return(n/1e9).toFixed(2)+'B';if(a>=1e6)return(n/1e6).toFixed(2)+'M';if(a>=1e5)return(n/1e3).toFixed(1)+'K';return n.toLocaleString('ru-RU',{minimumFractionDigits:d,maximumFractionDigits:d})};
 const usd=(n,d=0)=>(n<0?'−':'')+'$'+fmt(Math.abs(n),d);
-const own=id=>S.own[id]||0, lvl=id=>S.lvl[id]||0;
+const own=id=>S.own[id]||0,lvl=id=>S.lvl[id]||0;
 const rigCost=r=>Math.round(r.c*Math.pow(1.15,own(r.id)));
 const upCost=u=>Math.round(u.c*Math.pow(u.m,lvl(u.id)));
 const active=r=>S.off[r.id]?0:own(r.id);
-const hash=()=>RIGS.reduce((a,r)=>a+active(r)*r.h,0);
-const power=()=>RIGS.reduce((a,r)=>a+active(r)*r.p,0)*(1-.15*lvl('cool'));
+const coffeeOn=()=>S.coffee>0;
+const hMul=()=>(1+PCS[lvl('pc')].m)*(1+.05*lvl('ram'))*(1+.05*lvl('cat'))*(coffeeOn()?1.15:1);
+const pMul=()=>(1-.15*lvl('cool'))*(1-.05*lvl('psu'))*(1-.1*lvl('ac'));
+const manualPow=()=>.003*(1+.5*lvl('cpu'))*(1+.5*lvl('chair'))*(coffeeOn()?2:1);
+const hash=()=>RIGS.reduce((a,r)=>a+active(r)*r.h,0)*hMul();
+const power=()=>RIGS.reduce((a,r)=>a+active(r)*r.p,0)*pMul();
 const tariff=()=>S.tariff*S.tMul*(1-.2*lvl('solar'));
+const costS=()=>power()[id27159981|);
 let blackout=false;
+const incS=(]=>blackout?0:hash()*COIN_PER_HASH*S.price;
+const netNow=()=>incS()-(blackout?0:costS());
 
 function toast(t,bad){const e=$('toast');e.textContent=t;e.className='on'+(bad?' bad':'');clearTimeout(toast.t);toast.t=setTimeout(()=>e.className=bad?'bad':'',3200)}
 
 /* ---------- shop ---------- */
 const fanSVG='<svg class="fan" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="2.2"/><path d="M12 10c-1-4 0-8 3-8s2 5-3 8zM14 12c4-1 8 0 8 3s-5 2-8-3zM12 14c1 4 0 8-3 8s-2-5 3-8zM10 12c-4 1-8 0-8-3s5-2 8 3z" opacity=".85"/></svg>';
+let tab='rigs';
+const upsHtml=t=>UPS.filter(u=>u.
+
+
+tab===t).map(u=>`<div class="item"><div class="top"><b>${u.name}</b><span class="own" id="ul_${u.id}"></span></div><p>${u.d}</p><div class="act"><button class="btn" id="ub_${u.id}"></button></div></div>`).join('');
+function showTab(){
+ document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+ document.querySelectorAll('.pane').forEach(p=>p.style.display=p.dataset.p===tab?'grid':'none');
+}
 function buildShop(){
- $('rigs').innerHTML=RIGS.map(r=>`<div class="item"><div class="top"><b>${r.name}</b><span class="own" id="o_${r.id}"></span></div>
+ $('tabs').innerHTML=TABS.map(t=>`<button class="btn tab" data-t="${t[0]}">${t[1]}</button>`).join('');
+ document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{tab=b.dataset.t;showTab()});
+ const rigs=RIGS.map(r=>`<div class="item"><div class="top"><b>${r.name}</b><span class="own" id="o_${r.id}"></span></div>
   <div class="spec"><span class="h">Хешрейт <em>${r.h}</em></span><span class="p">Мощность <em id="pw_${r.id}"></em></span><span>Добыча <em id="rv_${r.id}"></em></span></div>
   <div class="act"><button class="btn" id="b_${r.id}"></button><button class="btn mini" id="t_${r.id}" title="Включить или выключить">⏻</button></div></div>`).join('');
+ const pc=`<div class="item"><div class="top"><b id="pcName"></b><span class="own">Твой компьютер</span></div><p id="pcDesc"></p>
+  <div class="spec"><span class="h">Бонус к хешрейту <em id="pcBonus"></em></span></div><p id="pcNext"></p><div class="act"><button class="btn" id="pcB"></button></div></div>`;
+ const cof=`<div class="item"><div class="top"><b>Кофе</b><span class="own" id="coffeeL"></span></div><p>Бодрит: хешрейт +15% и ручная добыча ×2 на 60 секунд. Чашки складываются, максимум 5 минут.</p><div class="act"><button class="btn" id="coffeeB">Выпить кофе за ${usd(COFFEE_COST)}</button></div></div>`;
+ $('shop').innerHTML=`<div class="pane" data-p="rigs">${rigs}</div><div class="pane" data-p="pc">${pc}${upsHtml('pc')}</div><div class="pane" data-p="life">${cof}${upsHtml('life')}</div><div class="pane" data-p="energy">${upsHtml('energy')}</div>`;
  RIGS.forEach(r=>{$('b_'+r.id).onclick=()=>{const c=rigCost(r);if(S.cash>=c){S.cash-=c;S.own[r.id]=own(r.id)+1;drawFarm();ui()}};
-  $('t_'+r.id).onclick=()=>{S.off[r.id]=!S.off[r.id];drawFarm();ui()}});
- $('ups').innerHTML=UPS.map(u=>`<div class="item"><div class="top"><b>${u.name}</b><span class="own" id="ul_${u.id}"></span></div>
-  <div class="spec">${u.d}</div><div class="act"><button class="btn" id="ub_${u.id}"></button></div></div>`).join('');
+  $('t_'+r.id).onclick=()=>{S.off[r.id]=!S.off[r.id];ui()}});
  UPS.forEach(u=>{$('ub_'+u.id).onclick=()=>{const c=upCost(u);if(lvl(u.id)<u.max&&S.cash>=c){S.cash-=c;S.lvl[u.id]=lvl(u.id)+1;ui()}}});
+ $('pcB').onclick=()=>{const l=lvl('pc');if(l<PCS.length-1&&S.cash>=PCS[l+1].c){S.cash-=PCS[l+1].c;S.lvl.pc=l+1;toast('Новый компьютер: '+PCS[l+1].n);ui()}};
+ $('coffeeB').onclick=()=>{if(S.cash>=COFFEE_COST){S.cash-=COFFEE_COST;S.coffee=Math.min(300,S.coffee+60);toast('Кофе выпит: бодрость включена');ui()}};
+ showTab();
 }
 function drawFarm(){
  const rows=RIGS.filter(r=>own(r.id)>0).map(r=>{const n=own(r.id),show=Math.min(n,10);
@@ -180,41 +224,41 @@ function drawFarm(){
  $('farm').innerHTML=rows.join('')||'<div class="empty">Ферма пуста. Купи первую видеокарту или добудь монеты вручную.</div>';
 }
 function unitState(){
- document.querySelectorAll('.unit').forEach(e=>{const off=S.off[e.dataset.r];e.className='unit '+(off||blackout?'off':'on')+(!off&&!blackout&&netNow()<0?' hot':'')});
+ const hot=netNow()<0;
+ document.querySelectorAll('.unit').forEach(e=>{const off=S.off[e.dataset.r];e.className='unit '+(off||blackout?'off':'on')+(!off&&!blackout&&hot?' hot':'')});
 }
 
 /* ---------- economy ---------- */
-const costS=()=>power()[id27159981|);
-const incS=(]=>blackout?0:hash()*COIN_PER_HASH*S.price;
-const netNow=()=>incS()-(blackout?0:costS());
-
 function tick(dt){
  const cost=costS()*dt;
  if(cost>0&&S.cash<cost){blackout=true}else{blackout=false;S.cash-=cost;S.coins+=hash()*COIN_PER_HASH*dt}
  if(S.tLeft>0){S.tLeft-=dt;if(S.tLeft<=0){S.tMul=1;toast('Тариф вернулся к обычному')}}
+ if(S.coffee>0){S.coffee=Math.max(0,S.coffee-dt)}
 }
 function priceStep(){
  S.trend*=.9;
- const shock=(Math.random()-.5)*.07;
  S.mean=Math.max(300,Math.min(4000,S.mean*(1+(Math.random()-.5)*.01)));
- S.price=Math.max(80,S.price*(1+shock+S.trend)+(S.mean-S.price)*.015);
+ S.price=Math.max(80,S.price*(1+(Math.random()-.5)*.07+S.trend)+(S.mean-S.price)*.015);
  S.hist.push(S.price);S.hist.shift();
 }
-function event(){
+function randomEvent(){
  const e=Math.random();
- if(e<.25){S.trend=.04;toast('Хайп вокруг FRM: курс растёт!')}
- else if(e<.45){S.price*=.65;toast('Крах рынка: курс упал на 35%',true)}
- else if(e<.7){S.tMul=1.9;S.tLeft=45;to
-Buy S.cash | Spaceship
-S.cash
+ if(e<.2){S.trend=.04;toast('Хайп вокруг FRM: курс растёт!')}
+ else if(e<.38){S.
 
 
-ast('Энергетики подняли тариф почти вдвое на 45 секунд',true)}
- else if(e<.9){S.tMul=.55;S.tLeft=45;toast('Ночной тариф: электричество вдвое дешевле на 45 секунд')}
- else{S.price*=1.5;toast('Крупный фонд купил FRM: курс +50%')}
+price*=.65;toast('Крах рынка: курс упал на 35%',true)}
+ else if(e<.58){S.tMul=1.9;S.tLeft=45;toast('Энергетики подняли тариф почти вдвое на 45 секунд',true)}
+ else if(e<.76){S.tMul=.55;S.tLeft=45;toast('Ночной тариф: электричество вдвое дешевле на 45 секунд')}
+ else if(e<.88){S.price*=1.5;toast('Крупный фонд купил FRM: курс +50%')}
+ else if(lvl('av')){toast('Антивирус отбил атаку хакеров')}
+ else{const l=S.coins*.15;S.coins-=l;toast('Хакеры украли '+fmt(l,4)+' FRM. Нужен антивирус',true)}
 }
 
 /* ---------- UI ---------- */
+function setUp(u){const l=lvl(u.id),b=$('ub_'+u.id);
+ $('ul_'+u.id).textContent=u.max===1?(l?'Куплено':''):'Уровень '+l+' из '+u.max;
+ if(l>=u.max){b.textContent=u.max===1?'Куплено':'Максимум';b.disabled=true}else{const c=upCost(u);b.textContent='Купить за '+usd(c);b.disabled=S.cash<c}}
 function ui(){
  $('sCash').textContent=usd(S.cash,S.cash<100?2:0);
  $('sCoins').textContent=fmt(S.coins,4);
@@ -223,67 +267,72 @@ function ui(){
  const inc=incS(),c=blackout?0:costS(),net=inc-c;
  $('sInc').textContent=usd(inc,2);$('sCost').textContent=usd(c,2);
  $('sNet').textContent=usd(net,2);$('sNet').className=net>=0?'up':'down';
- $('tar').textContent='Тариф: '+usd(tariff(),2)+' за кВт/с'+(S.tMul>1?' (повышен)':S.tMul<1?' (скидка)':'');
- $('hr').textContent='Хешрейт: '+fmt(hash())+' · '+fmt(power(),1)+' кВт';
- $('blackout').classList.toggle('on',blackout);
+ $('tarInfo').textContent='Тариф: '+usd(tariff(),2)+' за кВт/с'+(S.tMul>1?' (повышен)':S.tMul<1?' (скидка)':'');
+ $('hrInfo').textContent='Хешрейт: '+fmt(hash(),1)+' · '+fmt(power(),1)+' кВт';
+ $('alertBox').classList.toggle('on',blackout);
+ $('manualInfo').textContent='+'+fmt(manualPow(),4)+' FRM за нажатие'+(coffeeOn()?' (кофе: бодрость ещё '+Math.ceil(S.coffee)+' с)':'');
  const canSell=S.coins>0.00001;document.querySelectorAll('[data-s]').forEach(b=>b.disabled=!canSell);
  RIGS.forEach(r=>{const cst=rigCost(r);
   $('o_'+r.id).textContent='Куплено: '+own(r.id);
-  $('pw_'+r.id).textContent=fmt(r.p*(1-.15*lvl('cool')),2)+' кВт';
-  $('rv_'+r.id).textContent=usd(r.h*COIN_PER_HASH*S.price,2)+'/с';
+  $('pw_'+r.id).textContent=fmt(r.p*pMul(),2)+' кВт';
+  $('rv_'+r.id).textContent=usd(r.h*hMul()*COIN_PER_HASH*S.price,2)+'/с';
   const b=$('b_'+r.id);b.textContent='Купить за '+usd(cst);b.disabled=S.cash<cst;
   const t=$('t_'+r.id);t.classList.toggle('offc',!!S.off[r.id]);t.disabled=!own(r.id)});
- UPS.forEach(u=>{const l=lvl(u.id),b=$('ub_'+u.id);$('ul_'+u.id).textContent='Уровень '+l+' из '+u.max;
-  if(l>=u.max){b.textContent='Максимум';b.disabled=true}else{const c=upCost(u);b.textContent='Улучшить за '+usd(c);b.disabled=S.cash<c}});
+ UPS.forEach(setUp);
+ const l=lvl('pc'),nx=PCS[l+1];
+ $('pcName').textContent=PCS[l].n;$('pcDesc').textContent=PCS[l].d;$('pcBonus').textContent='+'+Math.round(PCS[l].m*100)+'%';
+ $('pcNext').textContent=nx?'Следующий: «'+nx.n+'». '+nx.d+' Бонус +'+Math.round(nx.m*100)+'%.':'Это лучший компьютер.';
+ $('pcB').textContent=nx?'Купить «'+nx.n+'» за '+usd(nx.c):'Максимум';$('pcB').disabled=!nx||S.cash<nx.c;
+ $('coffeeL').textContent=coffeeOn()?'Бодрость: '+Math.ceil(S.coffee)+' с':'';
+ $('coffeeB').disabled=S.cash<COFFEE_COST;
  unitState();
 }
 
 /* ---------- chart ---------- */
-const cv=$('chart'),cx=cv.getContext('2d');
+const cv=$('cvs'),cx=cv.getContext('2d');
 function chart(){
  const dpr=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;
- if(cv.width!==w*dpr){cv.width=w*dpr;cv.height=h*dpr}
+ if(!w||!h)return;
+ if(cv.width!==Math.round(w*dpr)){cv.width=Math.round(w*dpr);cv.height=Math.round(h*dpr)}
  cx.setTransform(dpr,0,0,dpr,0,0);cx.clearRect(0,0,w,h);
- const d=S.hist,mn=Math.min(...d)*.95,mx=Math.max(...d)*1.05,pad=10;
- const X=i=>i/(d.length-1)*(w-70),Y=v=>pad+(1-(v-mn)/(mx-mn))*(h-pad*2);
- cx.font='11px Onest,sans-serif';cx.fillStyle='#8aa0a2';cx.strokeStyle='#1e2d33';cx.lineWidth=1;
- for(let i=0;i<4;i++){const v=mn+(mx-mn)*i/3,y=Y(v);cx.beginPath();cx.moveTo(0,y);cx.lineTo(w-62,y);cx.stroke();cx.fillText('$'+Math.round(v),w-58,y+4)}
+ const d=S.hist,mn=Math.min(...d)*.95,mx=Math.max(...d)*1.05,pad=10,cw=w-62;
+ const X=i=>i/(d.length-1)*cw,Y=v=>pad+(1-(v-mn)/(mx-mn))*(h-pad*2);
+ cx.font='11px sans-serif';cx.fillStyle='#8aa0a2';cx.strokeStyle='#1e2d33';cx.lineWidth=1;
+ for(let i=0;i<4;i++){const v=mn+(mx-mn)*i/3,y=Y(v);cx.beginPath();cx.moveTo(0,y);cx.lineTo(cw,y);cx.stroke();cx.fillText('$'+Math.round(v),cw+6,y+4)}
  const up=d[d.length-1]>=d[0],col=up?'#5be28a':'#ff5c6a';
  const g=cx.createLinearGradient(0,0,0,h);g.addColorStop(0,col+'55');g.addColorStop(1,col+'00');
  cx.beginPath();d.forEach((v,i)=>i?cx.lineTo(X(i),Y(v)):cx.moveTo(X(i),Y(v)));
- cx.lineTo(X(d.length-1),h);cx.lineTo(0,h);cx.closePath();cx.fillStyle=g;cx.fill();
+ cx.lineTo(cw,h);cx.lineTo(0,h);cx.closePath();cx.fillStyle=g;cx.fill();
  cx.beginPath();d.forEach((v,i)=>i?cx.lineTo(X(i),Y(v)):cx.moveTo(X(i),Y(v)));
  cx.strokeStyle=col;cx.lineWidth=2;cx.lineJoin='round';cx.stroke();
  const lx=X(d.length-1),ly=Y(d[d.length-1]);
- cx.beginPath();cx.arc(lx,ly,4,0,7);cx.fillStyle=col;cx.fill();
+ cx.beginPath();cx.arc(l
+
+
+x,ly,4,0,7);cx.fillStyle=col;cx.fill();
  cx.beginPath();cx.arc(lx,ly,8,0,7);cx.strokeStyle=col+'66';cx.stroke();
 }
 
 /* ---------- actions ---------- */
 document.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{
  const q=S.coins*parseFloat(b.dataset.s);S.coins-=q;const g=q*S.price;S.cash+=g;toast('Продано на '+usd(g,2));ui()});
-$('manual').onclick=()=>{S.coins+=.003;ui()};
-$('reset').onclick=()=>{if(confirm('Стереть прогресс и начать заново?')){S=fresh();for(let i=0;i<120;i++)S.hist.push(S.price);drawFarm();ui();chart();save()}};
+$('manual').onclick=()=>{S.coins+=manualPow();ui()};
+$('reset').onclick=()=>{if(confirm('Стереть прогресс и начать заново?')){S=fresh();drawFarm();ui();chart();saveState()}};
 
 /* ---------- loop ---------- */
-buildShop();drawFarm();ui();chart();
+buildShop();drawFarm();ui();
+requestAnimationFrame(chart);
 let last=performance.now(),acc=0,evT=0;
 setInterval(()=>{
  const n=performance.now(),dt=Math.min((n-last)/1000,5);last=n;
  tick(dt);acc+=dt;evT+=dt;
  if(acc>=1){acc-=1;priceStep();chart()}
- if(evT>=S.evIn){evT=0;S.evIn=40+Math.random()*30;event()}
+ if(evT>=S.evIn){evT=0;S.evIn=40+Math.random()*30;randomEvent()}
  ui();
 },200);
-setInterval(save,5000);
-addEventListener('beforeunload',save);
+setInterval(saveState,5000);
+addEventListener('beforeunload',saveState);
 addEventListener('resize',chart);
 </script>
 </body>
 </html>
-
-
-
-
-
-
