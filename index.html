@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Проверка на бота</title>
+    <style>
+        body { display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #fafafa; }
+        .heart { width: 100px; height: 100px; position: relative; cursor: pointer; animation: beat 1s infinite ease-in-out; }
+        @keyframes beat { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.1); } }
+    </style>
+</head>
+<body>
+<div class="heart"></div>
+<script>
+document.querySelector('.heart').addEventListener('click', () => {
+    alert("Поздравляю! Ты настоящий бот!");
+});
+</script>
+</body>
+</html>
